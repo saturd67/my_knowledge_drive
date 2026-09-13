@@ -34,9 +34,9 @@ Chroma document IDs double as "open in Drive" links.
    walks it and converts every file to plain text under
    `resources/converted_files/`, dispatching by type via
    `OutputFileFactory` in `components/FileManager.py`:
-   - `.docx` → HTML (via `mammoth`) → text, with embedded images OCR'd
-     (via `pytesseract`) and inlined between `-----img start/end-----` markers.
-   - images (`image/*`) → OCR'd directly to text.
+   - `.docx` → HTML (via `mammoth`) → text. Embedded images are dropped, never
+     read out as text.
+   - images (`image/*`) → not converted, so never embedded.
    - code/config/text files (`.py`, `.js`, `.json`, `.html`, `.xml`, `.txt`,
      `.bat`, `.java`, `.iml`, `.gitignore`) → read as-is.
    - anything else is skipped. `existing_file_types` documents which MIME
@@ -89,9 +89,6 @@ plans/                    Design docs, one per table/feature (settings-table.md 
 ## Prerequisites
 
 - Python 3.12 (a `.venv` is already set up in the repo).
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed and
-  on `PATH` — required by `pytesseract` for OCR'ing images and images
-  embedded in `.docx` files.
 - A Google Cloud **service account** with read-only access to the target
   Drive folder, with its JSON key saved at
   `C:/secrets/my_knowledge_drive_service_account.json`. That path and the

@@ -46,8 +46,7 @@ from services.file_downloader_service.downloadable_file.unsupported_file import 
 from services.file_downloader_service.downloadable_file_factory import DownloadableFileFactory
 from services.file_downloader_service.file_downloader_service import FileDownloaderService
 from services.file_embedder_service.file_embedder_service import FileEmbedderService
-from services.file_path_header_service.file_path_header_service import FilePathHeaderService
-from services.image_converter_service.image_converter_service import ImageConverterService
+from services.file_convert_service.file_convert_service import FileConvertService
 from services.library_service.library_service import LibraryService
 
 logger = logging.getLogger(__name__)
@@ -70,7 +69,7 @@ class SyncPlannerService:
     #: The three things an update does.
     UPDATE_STEPS = (
         "Download the picked files",
-        "Convert their images",
+        "Convert the picked files",
         "Update the collection",
     )
 
@@ -231,9 +230,7 @@ class SyncPlannerService:
         results["download_failed"] = download_failed_file_count
 
         self._start_step(SyncPlannerService.UPDATE_STEPS, 2, on_step, is_cancelled)
-        converted_file_count, converted_image_count = self._convert(fetch_changes)
-        results["converted"] = converted_file_count
-        results["converted_images"] = converted_image_count
+        results["converted"] = self._convert(fetch_changes)
 
         self._start_step(SyncPlannerService.UPDATE_STEPS, 3, on_step, is_cancelled)
         results.update(self._apply_to_collection(picked_changes, removal_changes))
@@ -273,19 +270,19 @@ class SyncPlannerService:
         return downloaded_file_count, failed_file_count
 
     def _convert(self, fetch_changes):
-        """Copies each fetched file across and reads its images out.
+        """Copies each fetched file across and fits the copy to the model's window.
+
+        Returns how many files were copied and converted.
 
         The copy is what keeps the run repeatable, the same as a reset: the
-        base64 images stay in the downloaded source, and only the copy under
-        the converted folder loses them."""
+        downloaded source keeps its images and full text, and only the copy
+        under the converted folder is cut down."""
         if not fetch_changes:
             logger.info("Nothing to convert")
-            return 0, 0
+            return 0
 
-        image_converter_service = ImageConverterService()
-        file_path_header_service = FilePathHeaderService()
+        file_convert_service = FileConvertService()
         converted_file_count = 0
-        converted_image_count = 0
 
         for file_change in fetch_changes:
             source_path = self.input_dir / file_change.document_id
@@ -299,14 +296,11 @@ class SyncPlannerService:
             shutil.copy2(source_path, output_path)
             converted_file_count += 1
 
-            if output_path.suffix.lower() in ImageConverterService.MARKDOWN_EXTENSIONS:
-                converted_image_count += image_converter_service.convert_markdown_file(output_path)
+            # Every copied file rather than only the markdown - a .txt is
+            # embedded too, so it has to fit the window as well.
+            file_convert_service.add_to_file(output_path, self.output_dir)
 
-            # After the images, and for every copied file rather than only the
-            # markdown - a .txt is embedded too, so its path counts as well.
-            file_path_header_service.add_to_file(output_path, self.output_dir)
-
-        return converted_file_count, converted_image_count
+        return converted_file_count
 
     def _apply_to_collection(self, picked_changes, removal_changes):
         """Embeds what was fetched or was already stale, deletes the rest."""

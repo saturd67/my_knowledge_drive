@@ -60,17 +60,16 @@ MODES = [
 RESULT_TILES = [
     ("Downloaded", ("downloaded",), "primary"),
     ("Converted", ("converted",), "primary"),
-    ("Images read", ("converted_images",), "primary"),
     ("Embedded", ("embedded",), "success"),
     ("Skipped", ("download_skipped", "embed_skipped"), "neutral"),
-    ("Failed", ("download_failed", "convert_failed", "embed_failed"), "danger"),
+    ("Failed", ("download_failed", "embed_failed"), "danger"),
 ]
 
 #: What an update did, for the tiles after a Sync run.
 UPDATE_TILES = [
     ("Selected", ("selected",), "primary"),
     ("Downloaded", ("downloaded",), "primary"),
-    ("Images read", ("converted_images",), "primary"),
+    ("Converted", ("converted",), "primary"),
     ("Embedded", ("embedded",), "success"),
     ("Removed", ("removed",), "warning"),
     ("Failed", ("download_failed", "embed_failed"), "danger"),
@@ -282,7 +281,7 @@ class ScanStepsSection(ft.Column):
     #: And what each update step does.
     UPDATE_DESCRIPTIONS = [
         "Fetches only the ticked files again, one call per file.",
-        "Copies each one to {output_dir} and OCRs the images inside it.",
+        "Copies each one to {output_dir} and cuts it to its path, headings and opening text.",
         "Upserts what was fetched, and deletes the documents you ticked.",
     ]
 
@@ -581,7 +580,7 @@ class ResetStepsSection(ft.Column):
         "survives into this one.",
         "Every supported file in the Drive folder is re-downloaded to {input_dir}.",
         "{output_dir} is deleted and recreated.",
-        "Each .docx and image is OCR'd again from scratch.",
+        "Each file is copied and cut to its path, headings and opening text.",
         "The Chroma collection is deleted and recreated.",
         "All converted text is embedded back into the store.",
     ]
@@ -762,8 +761,8 @@ class ResetStepsSection(ft.Column):
                             ft.Text(
                                 "This cannot be undone. The downloaded sources, the converted "
                                 "text and every embedding are deleted before the rebuild "
-                                "starts, and a full run takes a few minutes because each "
-                                ".docx and image is OCR'd again.",
+                                "starts, and a full run takes a few minutes because every "
+                                "file is downloaded from Drive again.",
                                 size=13,
                                 color=p.text_muted,
                             ),

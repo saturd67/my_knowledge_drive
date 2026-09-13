@@ -5,7 +5,7 @@ only: it calls `start_reset()`, and gets told which step is running through a
 callback it passes in.
 
 The three workers it drives are the standalone services - the downloader, the
-image converter and the embedder. They take their folders as arguments rather
+file converter and the embedder. They take their folders as arguments rather
 than reading the setting table themselves, so this is where the settings are
 read and handed to them.
 
@@ -19,8 +19,8 @@ a file removed upstream disappears here too.
 
 That also means the local mirror is gone the moment step 1 runs: a reset that
 fails at step 2 leaves no sources to fall back on, and has to be run again
-once Drive is reachable. Conversion still never rewrites the sources - the
-images are read out of the copy in converted_files.
+once Drive is reachable. Conversion still never rewrites the sources - only
+the copy in converted_files is cut down to fit the model.
 """
 
 import logging
@@ -41,8 +41,7 @@ from services.DriveFileService import driveFileService
 from services.SettingService import settingService
 from services.file_downloader_service.file_downloader_service import FileDownloaderService
 from services.file_embedder_service.file_embedder_service import FileEmbedderService
-from services.file_path_header_service.file_path_header_service import FilePathHeaderService
-from services.image_converter_service.image_converter_service import ImageConverterService
+from services.file_convert_service.file_convert_service import FileConvertService
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +93,7 @@ class LibraryResetService:
         self._clear_converted_files()
 
         self._start_step(4, on_step, is_cancelled)
-        converted_file_count, converted_image_count, _, image_failed_file_count = self._convert()
-        results["converted"] = converted_file_count
-        results["converted_images"] = converted_image_count
-        results["convert_failed"] = image_failed_file_count
+        results["converted"] = self._convert()
 
         file_embedder_service = FileEmbedderService(
             self.output_dir,
@@ -157,20 +153,17 @@ class LibraryResetService:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _convert(self):
-        """Copies the downloaded tree, then reads its images out as text.
+        """Copies the downloaded tree, then fits each copy to the model's window.
 
-        The copy is what makes the run repeatable - the base64 images stay in
-        the downloaded sources, and only converted_files loses them."""
+        Returns how many files were converted.
+
+        The copy is what makes the run repeatable - the sources keep their
+        base64 images and full text, and only converted_files is cut down.
+        Images are not read out as text any more: FileConvertService drops image
+        text, so reading it was minutes of work nothing used."""
         logger.info(f"Copying {self.input_dir} to {self.output_dir}")
         shutil.copytree(self.input_dir, self.output_dir, dirs_exist_ok=True)
-        image_converter_service = ImageConverterService()
-        results = image_converter_service.start_converting_images(self.output_dir)
-
-        # After the images, so the path is the first line of the finished file
-        # rather than something the image pass could push down.
-        FilePathHeaderService().add_to_folder(self.output_dir)
-
-        return results
+        return FileConvertService().add_to_folder(self.output_dir)
 
     @staticmethod
     def _start_step(step_number, on_step, is_cancelled):

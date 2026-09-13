@@ -11,9 +11,9 @@ even though the reading is not.
 Two shapes of embedded image are recognised, both produced by the download
 pipeline: the inline `![alt](data:image/png;base64,...)` mammoth writes for a
 .docx, and the `![alt][image1]` plus trailing definition Drive writes when it
-exports a Google Doc. The patterns are `ImageConverterService`'s own - the
-same ones it uses to strip those images on the way to the converted copy - so
-what the pane recognises and what the converter removes cannot drift apart.
+exports a Google Doc. The patterns are `FileConvertService`'s own - it drops
+those same images on the way to the converted copy - so what the pane
+recognises and what the converter removes live in one place.
 """
 
 import base64
@@ -21,7 +21,7 @@ import binascii
 import logging
 import re
 
-from services.image_converter_service.image_converter_service import ImageConverterService
+from services.file_convert_service.file_convert_service import FileConvertService
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,8 @@ class MarkdownBlockParser:
     def parse(self, text):
         """Split a file into the (kind, payload) blocks the pane draws.
 
-        Deliberately small: the files are the markdown the downloader wrote or
-        the plain text the image converter wrote, and this recognises only what
+        Deliberately small: the files are the markdown and plain text the
+        downloader wrote, and this recognises only what
         the reading pane can render. Anything it does not know becomes a
         paragraph, so nothing is ever dropped.
         """
@@ -48,7 +48,7 @@ class MarkdownBlockParser:
         # The definitions are markup rather than content - they are only what
         # the references point at, and each carries a whole base64 payload on
         # one line.
-        text = ImageConverterService.REFERENCE_DEFINITION.sub("", text)
+        text = FileConvertService.REFERENCE_DEFINITION.sub("", text)
 
         blocks = []
         paragraph = []
@@ -114,7 +114,7 @@ class MarkdownBlockParser:
         Doc export while the `![alt][image1]` that points at them is in the
         body, so a single pass down the lines would reach the reference first.
         """
-        return dict(ImageConverterService.REFERENCE_DEFINITION.findall(text))
+        return dict(FileConvertService.REFERENCE_DEFINITION.findall(text))
 
     def _image_blocks(self, line, encoded_images_by_reference):
         """One line split into image and text blocks, in source order.
@@ -134,7 +134,7 @@ class MarkdownBlockParser:
                 blocks.append(("p", leading_text))
             image_bytes = self._decode_image(encoded_image)
             blocks.append(("image", image_bytes) if image_bytes is not None
-                          else ("p", ImageConverterService.UNREADABLE_IMAGE_TEXT))
+                          else ("p", FileConvertService.UNREADABLE_IMAGE_TEXT))
             cursor = end
 
         trailing_text = line[cursor:].strip()
@@ -152,10 +152,10 @@ class MarkdownBlockParser:
         """
         spans = []
 
-        for match in ImageConverterService.INLINE_IMAGE.finditer(line):
+        for match in FileConvertService.INLINE_IMAGE.finditer(line):
             spans.append((match.start(), match.end(), match.group(1)))
 
-        for match in ImageConverterService.REFERENCE_IMAGE.finditer(line):
+        for match in FileConvertService.REFERENCE_IMAGE.finditer(line):
             encoded_image = encoded_images_by_reference.get(match.group(1))
             # A reference whose definition is missing is left alone, to fall
             # through and read as the ordinary text it now is.

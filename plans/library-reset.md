@@ -28,9 +28,10 @@ def start_reset(self, on_step=None, is_cancelled=None):
   (`library_reset_service.py:135-142`).
 - It checks `is_cancelled()` at the same boundary and raises
   `LibraryResetCancelled`, leaving written work in place.
-- It returns a `results` dict with nine counts: `downloaded`,
-  `download_skipped`, `download_failed`, `converted`, `converted_images`,
-  `convert_failed`, `embedded`, `embed_skipped`, `embed_failed`.
+- It returns a `results` dict with seven counts: `downloaded`,
+  `download_skipped`, `download_failed`, `converted`, `embedded`,
+  `embed_skipped`, `embed_failed`. (`converted_images` and `convert_failed`
+  went when conversion stopped reading images out as text.)
 - `main()` (`library_reset_service.py:145`) already drives the whole thing from
   a terminal. **That is the reference implementation for this screen** — the UI
   version is the same sequence with the progress drawn instead of printed.
@@ -188,7 +189,7 @@ class RunnerLogHandler(logging.Handler):
   run. All three workers use `logging.getLogger(__name__)` under `services.*`,
   so one `getLogger("services")` catches exactly the right set.
 - Level `INFO`. The workers put per-file noise at `DEBUG` deliberately
-  (`image_converter_service.py:92`, `file_embedder_service.py:89`); a "Log
+  (`file_embedder_service.py:89`); a "Log
   level: verbose" toggle can lower it later if anyone wants it.
 - **Cap `lines` at `MAX_LINES` with a `collections.deque(maxlen=...)`.** An
   unbounded list over a run that touches ~350 files across five steps is a leak,
@@ -295,8 +296,9 @@ All four are stand-ins today (`library_sync_view.py:139-178`):
 | Last reset | `"6 days ago"` | needs `sync_run`; until that exists, render **"never"** |
 
 **"Estimated duration" should be removed rather than guessed.** It depends on
-Drive throughput and on how many of the source files contain images to OCR,
-neither of which is known before the run. A number invented at ±10× is worse
+Drive throughput and on how many source files there are to fetch, neither of
+which is known before the run. (It used to hinge on images to OCR as well;
+conversion no longer reads images, so the download dominates.) A number invented at ±10× is worse
 than no row. Reinstate it once `sync_run` records real durations and it can be
 "last reset took 6m 20s".
 

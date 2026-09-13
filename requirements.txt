@@ -5,9 +5,6 @@
 # here - pin a transitive package only when a version of it actually breaks us.
 #
 #     pip install -r requirements.txt
-#
-# Tesseract itself is not a Python package: pytesseract only drives it, so the
-# OCR steps need the Tesseract binary installed and on PATH as well.
 
 # The desktop UI - flet-desktop is what opens the native window, and flet
 # brings it in on Windows, but it is named here because a UI-less install of
@@ -25,10 +22,8 @@ sentence-transformers==5.2.0
 google-api-python-client==2.187.0
 google-auth==2.41.1
 
-# Reading the downloaded files - .docx to HTML, HTML to text, and the images
-# out of both.
+# Reading the downloaded files - .docx to HTML, and HTML to text. Images are
+# never read out as text, so there is no OCR package (and no Tesseract).
 mammoth==1.11.0
 beautifulsoup4==4.14.3
-pillow==12.0.0
-pytesseract==0.3.13
 sentence_transformers==5.2.0
