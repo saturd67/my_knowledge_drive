@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Python",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "C:\\Users\\cheah\\Desktop\\Apps\\MyKnowledgeDrive-2.0-ui-refactor\\main.py",
+            "console": "integratedTerminal"
+        }
+    ]
+}

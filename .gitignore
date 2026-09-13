@@ -1,1 +1,4 @@
 /files/
+__pycache__/
+resources/*
+.idea/*

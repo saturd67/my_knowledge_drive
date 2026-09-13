@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# Where the app is installed. Not configuration - every configurable path is a
+# row in the setting table, stored relative to this.
 BASE_DIR = str(Path(__file__).parent.parent)
-INPUT_FILE_DIR = BASE_DIR + "\\resources\\files"
-OUTPUT_FILE_DIR = BASE_DIR + "\\resources\\converted_files"
+
+DB_PATH = BASE_DIR + "\\resources\\knowledge_drive.db"

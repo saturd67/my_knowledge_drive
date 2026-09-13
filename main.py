@@ -1,21 +1,30 @@
-from constant.paths import INPUT_FILE_DIR, BASE_DIR
-from pathlib import Path
-from components.FileManager import OutputFileFactory
-from services.FileFetcherService import FileFetcherService
+"""Flet entry point for the desktop UI.
 
-import logging
+Opens on the admin portal; the far-left rail switches to the user portal.
+The screens are presentation only - see view/user/ and view/admin/ for the
+layouts, and services/ for the code that does the real work.
+"""
+
+import flet as ft
+
+from services.DatabaseService import DatabaseService
+from view import theme
+from view.main_view import TITLES, MainView
+
+START_PORTAL = "user"
 
 
-ENABLE_LOGGING = True
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
-)
+def main(page: ft.Page):
+    page.title = TITLES[START_PORTAL]
+    page.padding = 0
+    page.spacing = 0
+    theme.apply(page)
+    theme.apply_window(page)
+    page.add(MainView(portal=START_PORTAL))
 
 
 if __name__ == "__main__":
-    file_fetcher_service = FileFetcherService()
-    results = file_fetcher_service.start_file_id_fetching()
-    for result in results:
-        print(result.get("file"))
+    # Once per process, before any screen reads a setting. Creates and seeds
+    # every table if the database is new; reading before this fails loudly.
+    DatabaseService().initialise()
+    ft.run(main)
