@@ -20,7 +20,7 @@ The three sources, and what each one settles:
 A file's identity through all of it is its path under the converted folder,
 extension and all - which is exactly the `documentId` every chunk
 `FileEmbedderService` writes for the file carries. The mapping from a Drive file to that path is
-not re-implemented here: `DownloadableFileFactory` already owns it, so the
+not re-implemented here: `LibraryFileFactory` already owns it, so the
 same object that would download the file is asked where it would land.
 """
 
@@ -42,11 +42,11 @@ from constant.settings import (
 from model.FileChange import FileChange
 from services.DriveFileService import driveFileService
 from services.SettingService import settingService
-from services.file_downloader_service.downloadable_file.unsupported_file import UnsupportedFile
-from services.file_downloader_service.downloadable_file_factory import DownloadableFileFactory
 from services.file_downloader_service.file_downloader_service import FileDownloaderService
 from services.file_embedder_service.file_embedder_service import FileEmbedderService
 from services.file_convert_service.file_convert_service import FileConvertService
+from services.library_file.library_file_factory import LibraryFileFactory
+from services.library_file.unsupported_file import UnsupportedFile
 from services.library_service.library_service import LibraryService
 
 logger = logging.getLogger(__name__)
@@ -375,10 +375,10 @@ class SyncPlannerService:
 
         Asked of the factory rather than worked out here, so the extension a
         Google Doc or a .docx ends up with has one definition."""
-        downloadable_file = DownloadableFileFactory.get_file(
+        library_file = LibraryFileFactory.get_file(
             None, file_id, name, mime_type, Path(folder_path)
         )
-        return downloadable_file.get_output_file_path()
+        return library_file.get_output_file_path()
 
     def _is_embeddable(self, file_id, name, mime_type, folder_path):
         """Whether this file can reach the collection at all.
@@ -386,12 +386,12 @@ class SyncPlannerService:
         Two ways it cannot: the downloader skips the type outright, or it
         downloads it into something the embedder does not read - a .pdf is
         kept byte for byte and then never embedded."""
-        downloadable_file = DownloadableFileFactory.get_file(
+        library_file = LibraryFileFactory.get_file(
             None, file_id, name, mime_type, Path(folder_path)
         )
-        if isinstance(downloadable_file, UnsupportedFile):
+        if isinstance(library_file, UnsupportedFile):
             return False
-        suffix = downloadable_file.get_output_file_path().suffix.lower()
+        suffix = library_file.get_output_file_path().suffix.lower()
         return suffix in FileEmbedderService.TEXT_EXTENSIONS
 
     def _file_downloader_service(self):

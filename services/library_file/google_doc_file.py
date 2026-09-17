@@ -1,13 +1,13 @@
 import logging
 
-from services.file_downloader_service.downloadable_file.downloadable_file import DownloadableFile
+from services.library_file.markdown_file import MarkdownFile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-class GoogleDocFile(DownloadableFile):
-    """A Google-native document. Drive exports it as markdown for us."""
+class GoogleDocFile(MarkdownFile):
+    """A Google-native document. Drive exports it as markdown for us, and it splits as markdown."""
 
     MIME_TYPE = "application/vnd.google-apps.document"
     MARKDOWN_MIME_TYPE = "text/markdown"

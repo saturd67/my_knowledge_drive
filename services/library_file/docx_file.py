@@ -1,14 +1,14 @@
 import io
 import logging
 
-from services.file_downloader_service.downloadable_file.downloadable_file import DownloadableFile
+from services.library_file.markdown_file import MarkdownFile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-class DocxFile(DownloadableFile):
-    """An uploaded .docx. Drive cannot export it, so it is converted here.
+class DocxFile(MarkdownFile):
+    """An uploaded .docx. Drive cannot export it, so it is converted to markdown here, and splits as markdown.
 
     Drive only exports Google-native files; converting a .docx through the API
     would mean copy-converting it into a Google Doc first, which is a write the

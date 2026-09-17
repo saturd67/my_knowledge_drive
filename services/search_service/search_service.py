@@ -26,7 +26,7 @@ from constant.settings import (
 )
 from model.SearchResult import SearchResult
 from services.SettingService import settingService
-from services.file_convert_service.file_convert_service import FileConvertService
+from services.library_file.library_file import LibraryFile
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class SearchService:
             search_result.file_text = file_texts_by_document_id.get(
                 search_result.document_id, search_result.chunk_text
             )
-            search_result.chunk_text = FileConvertService.remove_header(
+            search_result.chunk_text = LibraryFile.remove_header(
                 search_result.document_id, search_result.chunk_text
             )
         return search_results
@@ -146,7 +146,7 @@ class SearchService:
             if len(chunks) != chunks[0][1]:
                 logger.warning(f"{document_id} has {len(chunks)} of its {chunks[0][1]} chunks")
             file_texts_by_document_id[document_id] = "\n".join(
-                FileConvertService.remove_header(document_id, chunk_text) for _, _, chunk_text in chunks
+                LibraryFile.remove_header(document_id, chunk_text) for _, _, chunk_text in chunks
             )
         return file_texts_by_document_id
 

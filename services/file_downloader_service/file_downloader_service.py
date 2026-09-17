@@ -6,14 +6,19 @@ writes: LibraryResetService passes what the setting table holds, and the tests
 pass a temporary folder.
 
 This module only walks the folder tree. What happens to a file once it is found
-belongs to the DownloadableFile subclass that DownloadableFileFactory picks, one
-per file, each in its own file:
+belongs to the LibraryFile subclass that LibraryFileFactory picks, one per
+file, each in its own file under services/library_file/:
 
     folder                          -> walks into it, keeping the folder structure
     Google Doc (native)             -> GoogleDocFile   - exported from Drive as markdown (.md)
     .docx                           -> DocxFile        - converted to markdown (.md)
-    .pdf / .md / .txt               -> KeepAsIsFile    - downloaded byte for byte
+    .md / .markdown                 -> MarkdownFile    - downloaded byte for byte
+    .txt                            -> PlainTextFile   - downloaded byte for byte
+    .pdf                            -> PdfFile         - downloaded byte for byte
     anything else                   -> UnsupportedFile - skipped
+
+The same objects later split the converted copies into chunks, but that is
+FileConvertService's call to make - nothing here splits.
 """
 
 import logging
@@ -24,7 +29,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from services.file_downloader_service.downloadable_file_factory import DownloadableFileFactory
+from services.library_file.library_file_factory import LibraryFileFactory
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +91,12 @@ class FileDownloaderService:
         have put it. Returns False when the type is one we skip."""
         target_dir = self.output_dir / folder_path
         target_dir.mkdir(parents=True, exist_ok=True)
-        downloadable_file = DownloadableFileFactory.get_file(
+        library_file = LibraryFileFactory.get_file(
             self.drive_service, file_id, self._sanitize_name(name), mime_type, target_dir
         )
-        is_downloaded = downloadable_file.download()
+        is_downloaded = library_file.download()
         if is_downloaded:
-            self._record_drive_id(downloadable_file, file_id)
+            self._record_drive_id(library_file, file_id)
         return is_downloaded
 
     def _list_files_in_folder(self, folder_id, folder_path):
@@ -127,25 +132,25 @@ class FileDownloaderService:
                 failed_file_count += sub_failed_file_count
                 continue
 
-            downloadable_file = DownloadableFileFactory.get_file(
+            library_file = LibraryFileFactory.get_file(
                 self.drive_service, file["id"], name, mime_type, target_dir
             )
             try:
-                is_downloaded = downloadable_file.download()
+                is_downloaded = library_file.download()
             except (HttpError, OSError, ValueError) as error:
-                logger.error(f"Failed: {downloadable_file.get_output_file_path()} - {error}")
+                logger.error(f"Failed: {library_file.get_output_file_path()} - {error}")
                 failed_file_count += 1
                 continue
 
             if is_downloaded:
-                self._record_drive_id(downloadable_file, file["id"])
+                self._record_drive_id(library_file, file["id"])
                 downloaded_file_count += 1
             else:
                 skipped_file_count += 1
 
         return downloaded_file_count, skipped_file_count, failed_file_count
 
-    def _record_drive_id(self, downloadable_file, file_id):
+    def _record_drive_id(self, library_file, file_id):
         """Note which Drive file produced the path that was just written.
 
         Keyed by the path relative to this run's output folder, because that
@@ -154,7 +159,7 @@ class FileDownloaderService:
         keys on the path relative to *that*. The copy preserves the structure,
         so the same relative path names the same document in both.
         """
-        output_file_path = downloadable_file.get_output_file_path()
+        output_file_path = library_file.get_output_file_path()
         try:
             document_id = str(output_file_path.relative_to(self.output_dir))
         except ValueError:

@@ -21,7 +21,7 @@ import flet as ft
 
 from model.SearchResult import SearchResult
 from services.DriveFileService import driveFileService
-from services.file_convert_service.file_convert_service import FileConvertService
+from services.library_file.markdown_file import MarkdownFile
 from services.search_service.search_service import searchService
 from services.source_file_service.source_file_service import SourceFileService
 from view.base_view import BaseView
@@ -487,7 +487,7 @@ class FileBody(Card):
                     src=payload,
                     fit=ft.BoxFit.SCALE_DOWN,
                     border_radius=Radius.SM,
-                    error_content=ft.Text(FileConvertService.UNREADABLE_IMAGE_TEXT,
+                    error_content=ft.Text(MarkdownFile.UNREADABLE_IMAGE_TEXT,
                                           size=12, color=p.text_faint),
                 ),
                 alignment=ft.Alignment.CENTER_LEFT,
