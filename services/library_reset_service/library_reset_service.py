@@ -20,7 +20,7 @@ a file removed upstream disappears here too.
 That also means the local mirror is gone the moment step 1 runs: a reset that
 fails at step 2 leaves no sources to fall back on, and has to be run again
 once Drive is reachable. Conversion still never rewrites the sources - only
-the copy in converted_files is cut down to fit the model.
+the copy in converted_files is split into chunks that fit the model.
 """
 
 import logging
@@ -153,12 +153,12 @@ class LibraryResetService:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _convert(self):
-        """Copies the downloaded tree, then fits each copy to the model's window.
+        """Copies the downloaded tree, then splits each copy into chunks that fit the model's window.
 
         Returns how many files were converted.
 
         The copy is what makes the run repeatable - the sources keep their
-        base64 images and full text, and only converted_files is cut down.
+        base64 images and markup, and only converted_files is rewritten.
         Images are not read out as text any more: FileConvertService drops image
         text, so reading it was minutes of work nothing used."""
         logger.info(f"Copying {self.input_dir} to {self.output_dir}")

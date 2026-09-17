@@ -18,8 +18,8 @@ The three sources, and what each one settles:
     the Chroma collection  what is actually searchable, and as of when
 
 A file's identity through all of it is its path under the converted folder,
-extension and all - which is exactly the Chroma document id
-`FileEmbedderService` writes. The mapping from a Drive file to that path is
+extension and all - which is exactly the `documentId` every chunk
+`FileEmbedderService` writes for the file carries. The mapping from a Drive file to that path is
 not re-implemented here: `DownloadableFileFactory` already owns it, so the
 same object that would download the file is asked where it would land.
 """
@@ -270,13 +270,13 @@ class SyncPlannerService:
         return downloaded_file_count, failed_file_count
 
     def _convert(self, fetch_changes):
-        """Copies each fetched file across and fits the copy to the model's window.
+        """Copies each fetched file across and splits the copy into chunks that fit the model's window.
 
         Returns how many files were copied and converted.
 
         The copy is what keeps the run repeatable, the same as a reset: the
-        downloaded source keeps its images and full text, and only the copy
-        under the converted folder is cut down."""
+        downloaded source keeps its images and markup, and only the copy under
+        the converted folder is rewritten."""
         if not fetch_changes:
             logger.info("Nothing to convert")
             return 0
@@ -297,7 +297,7 @@ class SyncPlannerService:
             converted_file_count += 1
 
             # Every copied file rather than only the markdown - a .txt is
-            # embedded too, so it has to fit the window as well.
+            # embedded too, so it has to be split to fit the window as well.
             file_convert_service.add_to_file(output_path, self.output_dir)
 
         return converted_file_count

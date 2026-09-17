@@ -30,7 +30,7 @@ class LibraryService:
         )
 
     def find_all_documents(self):
-        """Every document in the collection, sorted by label.
+        """Every document in the collection, once each however many chunks it has, sorted by label.
 
         An empty list when the collection does not exist - never embedded, or
         a reset dropped it and stopped before refilling it. That is an empty
@@ -43,12 +43,19 @@ class LibraryService:
 
         collection = client.get_collection(self.collection_name)
         result = collection.get(include=["metadatas"])
-        documents = [
-            Document.from_chroma(document_id, metadata)
-            for document_id, metadata in zip(result["ids"], result["metadatas"])
-        ]
-        documents.sort(key=lambda document: document.label.lower())
-        logger.info(f"Read {len(documents)} documents from '{self.collection_name}'")
+
+        # A row is a chunk, and a file is split into several - so rows are
+        # folded into one Document per file. Every chunk of a file carries the
+        # same label and time, so whichever comes first speaks for them all.
+        documents_by_id = {}
+        for chunk_id, metadata in zip(result["ids"], result["metadatas"]):
+            document = Document.from_chroma(chunk_id, metadata)
+            documents_by_id.setdefault(document.document_id, document)
+
+        documents = sorted(documents_by_id.values(), key=lambda document: document.label.lower())
+        logger.info(
+            f"Read {len(documents)} documents ({len(result['ids'])} chunks) from '{self.collection_name}'"
+        )
         return documents
 
     def collection_exists(self, client):

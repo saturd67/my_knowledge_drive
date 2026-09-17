@@ -26,11 +26,17 @@ from constant.settings import (
 )
 from model.SearchResult import SearchResult
 from services.SettingService import settingService
+from services.file_convert_service.file_convert_service import FileConvertService
 
 logger = logging.getLogger(__name__)
 
 
 class SearchService:
+
+    #: How many chunks are ranked for each file a search wants, to begin with.
+    #: Several chunks of one file are often the closest few, and they make one
+    #: hit between them.
+    CHUNKS_PER_RESULT = 4
 
     def __init__(self):
         #: The loaded sentence-transformer and the model name it was built
@@ -40,10 +46,11 @@ class SearchService:
         self._embedding_function = None
 
     def search(self, query):
-        """The closest documents to `query`, closest first.
+        """The closest documents to `query`, closest first - one hit per file.
 
-        An empty list for a blank query, and for a collection that is not
-        there - nothing has been embedded, which is not an error.
+        Each hit carries the chunk that matched and the whole file rebuilt
+        from its chunks. An empty list for a blank query, and for a collection
+        that is not there - nothing has been embedded, which is not an error.
         """
         query = query.strip()
         if not query:
@@ -56,26 +63,92 @@ class SearchService:
         wanted = int(settingService.find_active_by_key(EMBEDDING_RESULTS_PER_QUERY))
         # Asking for more than the collection holds is an error in chroma, and
         # a fresh library can easily hold fewer than the configured five.
-        count = collection.count()
-        if not count:
+        chunk_count = collection.count()
+        if not chunk_count:
             return []
 
-        logger.info(f"Searching '{query}' for the closest {min(wanted, count)} of {count}")
-        result = collection.query(
-            query_texts=[query],
-            n_results=min(wanted, count),
-            include=["documents", "metadatas", "distances"],
-        )
+        search_results = self._find_closest_files(collection, query, wanted, chunk_count)
 
-        return [
-            SearchResult.from_chroma(document_id, metadata, distance, file_text)
-            for document_id, metadata, distance, file_text in zip(
+        file_texts_by_document_id = self._find_file_texts(
+            collection, [search_result.document_id for search_result in search_results]
+        )
+        for search_result in search_results:
+            # Absent only for a document embedded whole, before files were
+            # split - and then the chunk that matched is all of it.
+            search_result.file_text = file_texts_by_document_id.get(
+                search_result.document_id, search_result.chunk_text
+            )
+            search_result.chunk_text = FileConvertService.remove_header(
+                search_result.document_id, search_result.chunk_text
+            )
+        return search_results
+
+    def _find_closest_files(self, collection, query, wanted, chunk_count):
+        """The `wanted` closest files, closest first, each scored by its closest chunk.
+
+        Chroma ranks chunks and knows nothing of files, and one long note can
+        fill the top of the ranking on its own. So more chunks are asked for
+        than files are wanted, and the ask doubles until enough different files
+        turn up or every chunk has been ranked.
+        """
+        n_results = min(wanted * SearchService.CHUNKS_PER_RESULT, chunk_count)
+        while True:
+            logger.info(f"Searching '{query}' for the closest {n_results} of {chunk_count} chunks")
+            result = collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"],
+            )
+
+            search_results_by_document_id = {}
+            for chunk_id, metadata, distance, chunk_text in zip(
                 result["ids"][0],
                 result["metadatas"][0],
                 result["distances"][0],
                 result["documents"][0],
+            ):
+                search_result = SearchResult.from_chroma(chunk_id, metadata, distance, chunk_text)
+                # Closest first, so the first chunk seen of a file is its best.
+                search_results_by_document_id.setdefault(search_result.document_id, search_result)
+
+            search_results = list(search_results_by_document_id.values())[:wanted]
+            if len(search_results) >= wanted or n_results >= chunk_count:
+                return search_results
+            n_results = min(n_results * 2, chunk_count)
+
+    @staticmethod
+    def _find_file_texts(collection, document_ids):
+        """document id -> the whole file, put back together from its chunks.
+
+        This is what the `documentId` on every chunk is for: whichever chunk a
+        search landed on, the filter brings back all of them, and `chunkIndex`
+        puts them in order. Each chunk's header - the path and the headings it
+        was embedded under - is taken off, so the file reads once, not once per
+        chunk. A file with fewer chunks than its `chunkCount` says was cut off
+        part way through being written; what there is is still returned.
+        """
+        if not document_ids:
+            return {}
+
+        result = collection.get(
+            where={"documentId": {"$in": document_ids}},
+            include=["documents", "metadatas"],
+        )
+        chunks_by_document_id = {}
+        for chunk_text, metadata in zip(result["documents"], result["metadatas"]):
+            chunks_by_document_id.setdefault(metadata["documentId"], []).append(
+                (metadata["chunkIndex"], metadata["chunkCount"], chunk_text)
             )
-        ]
+
+        file_texts_by_document_id = {}
+        for document_id, chunks in chunks_by_document_id.items():
+            chunks.sort()
+            if len(chunks) != chunks[0][1]:
+                logger.warning(f"{document_id} has {len(chunks)} of its {chunks[0][1]} chunks")
+            file_texts_by_document_id[document_id] = "\n".join(
+                FileConvertService.remove_header(document_id, chunk_text) for _, _, chunk_text in chunks
+            )
+        return file_texts_by_document_id
 
     def init_collection(self):
         """Load the embedding model now, so the first search does not.

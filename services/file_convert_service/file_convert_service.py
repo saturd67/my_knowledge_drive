@@ -1,35 +1,46 @@
-r"""Fits each converted file into the embedding model's window.
+r"""Splits each converted file into chunks that each fit the embedding model's window.
 
-The embedder makes one vector per file, and all-MiniLM-L6-v2 reads only the
-first 256 tokens of it - the rest of a long note was never searchable. So the
-converted copy is rebuilt in order of what is worth a token most:
+all-MiniLM-L6-v2 reads only the first 256 tokens of what it is given, so one
+vector per file left the rest of a long note unsearchable. The converted copy
+is rebuilt as a run of chunks instead, each small enough to be read whole, and
+the embedder stores every chunk as a document of its own:
 
     Java\Spring Boot\Spring Security\Spring Security.md     <- the path
     <blank>
-    # Spring Security                                        <- every heading
-    ## Authentication
-    ## Authorization
+    # Spring Security                                        <- the text, with its
+    Spring Security is a framework that ...                     headings where they
+    ## Authentication                                           stand, up to the
+    ...                                                         budget
+    <!-- chunk -->
     <blank>
-    Spring Security is a framework that ...                 <- opening text, up
-                                                               to the budget
+    Java\Spring Boot\Spring Security\Spring Security.md     <- the path again
+    Spring Security > Authentication                         <- the headings the
+    <blank>                                                     chunk starts under
+    ...the text carries on
+    <!-- chunk -->
+    ...
 
-The path puts the folders and the file name into the vector, so where a note is
-filed counts towards finding it. The headings carry the outline. The opening
-text fills whatever room is left, so a note without headings - most .txt files -
-is still found by what it says, not only by where it is kept.
+Every chunk opens with the path, so where a note is filed counts towards
+finding any part of it, and then with the headings above where it starts, so a
+passage from the middle of a section still says which section it is. The text
+is all of the file, in order - nothing is dropped for want of room any more.
+
+Chunks break between words, never inside one, and a heading always shares a
+chunk with the first word under it, so no chunk ends on the title of a section
+that starts in the next.
 
 Markdown markup is taken out on the way: `**bold**`, the `1\.` escapes a Google
 Docs export is full of, link targets, images and code blocks all cost tokens
 and carry little meaning, and every one removed leaves room for a word.
 Images are dropped outright - the inline base64 kind (INLINE_IMAGE) and the
 `![][image1]` references a Google Doc export uses - and never read out as
-text, so a note made only of images keeps its path.
+text, so a note made only of images is one chunk holding its path.
 
 Written into the converted copy, never the download: the sources under the
 input folder stay exactly as Drive gave them, which is what the reading pane
 shows and what makes a re-run repeatable. Both conversion paths copy the
 source over the top before calling this, so a second run rebuilds from a full
-file rather than an already-reduced one.
+file rather than an already-split one.
 
 Only the extensions the embedder reads are rewritten - a .pdf sitting in the
 folder is never embedded, so changing it would have no reader.
@@ -65,9 +76,17 @@ class FileConvertService:
     #: [CLS] and [SEP], which the model adds around every input.
     SPECIAL_TOKEN_COUNT = 2
 
-    #: The path, then a blank line. A blank line so the path cannot run into
-    #: the first heading and read as one line.
-    HEADER_TEMPLATE = "{document_id}\n\n"
+    #: Between a chunk's header - the path, and the headings it starts under -
+    #: and its text. A blank line so the header cannot run into the first line
+    #: and read as one, and so the header can be found again to take it off.
+    HEADER_SEPARATOR = "\n\n"
+
+    #: Between the headings on the second line of a chunk's header.
+    HEADING_PATH_SEPARATOR = " > "
+
+    #: Between two chunks in the converted file. The separator line has a
+    #: blank line after it, so each chunk still opens on its own path.
+    CHUNK_JOINER = f"\n{FileEmbedderService.CHUNK_SEPARATOR}\n\n"
 
     #: Markdown ATX heading levels, # to ######.
     HEADING_LEVELS = range(1, 7)
@@ -113,20 +132,20 @@ class FileConvertService:
         Returns how many files were rewritten.
         """
         converted_dir = Path(converted_dir)
-        logger.info(f"Fitting files to {FileConvertService.MAX_TOKENS} tokens in {converted_dir}")
-        stamped_file_count = 0
+        logger.info(f"Splitting files into chunks of {FileConvertService.MAX_TOKENS} tokens in {converted_dir}")
+        split_file_count = 0
         for file_path in sorted(converted_dir.rglob("*")):
             if file_path.is_file() and self.add_to_file(file_path, converted_dir):
-                stamped_file_count += 1
-        logger.info(f"Done. Fitted {stamped_file_count} file(s) to path, headings and opening text")
-        return stamped_file_count
+                split_file_count += 1
+        logger.info(f"Done. Split {split_file_count} file(s) into chunks")
+        return split_file_count
 
     def add_to_file(self, converted_file_path, converted_dir):
-        """Rewrites one converted file as its path, headings and opening text.
+        """Rewrites one converted file as the chunks it is embedded from.
 
         False when there was nothing to do, rather than an exception for a file
         that cannot be read: one bad file must not lose the rest of a run, and a
-        file left as it was is still embedded, just from its full text.
+        file left as it was is still embedded, just as one chunk of raw text.
         """
         converted_file_path = Path(converted_file_path)
         if converted_file_path.suffix.lower() not in FileEmbedderService.TEXT_EXTENSIONS:
@@ -145,77 +164,161 @@ class FileConvertService:
             return False
 
         # Belt and braces: the callers copy the source over the top first, so
-        # this should never fire - but reducing a reduced file would be silent.
+        # this should never fire - but splitting a split file would be silent.
         if text.startswith(document_id):
-            logger.debug(f"Already reduced: {converted_file_path}")
+            logger.debug(f"Already split: {converted_file_path}")
             return False
 
-        content = self.fit(document_id, text)
+        chunks = self.split(document_id, text)
         try:
-            converted_file_path.write_text(content, encoding="utf-8")
+            converted_file_path.write_text(FileConvertService.CHUNK_JOINER.join(chunks), encoding="utf-8")
         except OSError as error:
             logger.warning(f"Could not write {converted_file_path} - {error}")
             return False
 
+        logger.debug(f"Split {converted_file_path} into {len(chunks)} chunk(s)")
         return True
 
-    def fit(self, document_id, text):
-        """The path, every heading, then as much opening text as the window holds.
+    def split(self, document_id, text):
+        """`text` as chunks that each fit the window, in order.
 
-        The path and headings are always kept whole, even past the budget - they
-        are what the file is about. Text is added a word at a time: WordPiece
-        splits on whitespace before anything else, so a word's tokens are the
-        same alone as in a sentence, and the running total is exact.
+        Each chunk is its header - the path, then the headings it starts under
+        - followed by as much of the text as the window has room for, and the
+        next chunk carries on where it stopped. A file with no text once the
+        markup is out is one chunk holding the path alone.
+
+        A unit that is bigger than the window on its own - a heading hundreds
+        of words long - still gets a chunk, and the model reads what fits of
+        it: splitting a heading would name the section after half a title.
         """
-        content = FileConvertService.HEADER_TEMPLATE.format(document_id=document_id)
-        headings = FileConvertService.extract_headings(text)
-        if headings:
-            # Ends in its own blank line, so the text reads as a paragraph
-            # after the outline rather than one more heading.
-            content += "\n".join(headings) + "\n\n"
-
         budget_count = FileConvertService.MAX_TOKENS - FileConvertService.SPECIAL_TOKEN_COUNT
-        used_token_count = self.token_counter.count(content)
+        chunks = []
+        chunk_header = document_id
+        chunk_pieces = []
+        used_token_count = 0
 
-        words = []
-        for line in FileConvertService.extract_body_lines(text):
-            for word in line.split():
-                word_token_count = self.token_counter.count(word)
-                if used_token_count + word_token_count > budget_count:
-                    return FileConvertService._join(content, words)
-                used_token_count += word_token_count
-                words.append(word)
-        return FileConvertService._join(content, words)
+        for unit in self._units(text):
+            unit_token_count = sum(piece["token_count"] for piece in unit)
+            if chunk_pieces and used_token_count + unit_token_count > budget_count:
+                chunks.append(FileConvertService._join(chunk_header, chunk_pieces))
+                chunk_pieces = []
 
-    @staticmethod
-    def _join(content, words):
-        """`content` already ends in a blank line, so the text follows straight on."""
-        if not words:
-            return content.rstrip("\n") + "\n"
-        return f"{content}{' '.join(words)}\n"
+            if not chunk_pieces:
+                # A chunk is named for the section its first piece is in.
+                chunk_header = self._header(document_id, unit[0]["heading_path"])
+                used_token_count = self.token_counter.count(chunk_header)
 
-    @staticmethod
-    def extract_headings(text):
-        """The Markdown headings of `text`, in order, as tidied `## Title` lines."""
-        headings = []
-        for level, title in FileConvertService._parse(text):
-            if level:
-                headings.append(f"{'#' * level} {title}")
-        return headings
+            chunk_pieces += unit
+            used_token_count += unit_token_count
 
-    @staticmethod
-    def extract_body_lines(text):
-        """The prose of `text`, in order, with the markup taken out.
+        chunks.append(FileConvertService._join(chunk_header, chunk_pieces))
+        return chunks
 
-        Not headings (those are listed already), code blocks, images, link
-        targets, table borders, rules, or reference definitions - the last is
-        where a Google Docs export keeps its base64 images.
+    def _units(self, text):
+        """The text as the units chunks are packed from, in order.
+
+        A unit is a list of pieces that must share a chunk. A piece is one body
+        word, or one whole heading line. Each carries the line it came from, so
+        a chunk can put its words back into lines, and the titles of the
+        headings it sits under, so a chunk that starts on it can name its
+        section.
+
+        Most units are a single word. A heading is held back and joins the
+        word after it - only the heading straight above the text, so a run of
+        empty sections cannot grow one unit past the window.
+
+        Tokens are counted a piece at a time: WordPiece splits on whitespace
+        before anything else, so a word's tokens are the same alone as in a
+        sentence, and the running total is exact. Each distinct piece is
+        counted once - a long file repeats most of its words, and the tokenizer
+        is the slow part of a run.
         """
+        token_counts_by_text = {}
+        units = []
+        #: (level, title) of every heading above the current line, outermost first.
+        headings = []
+        held_heading_piece = None
+
+        for line_index, (level, line) in enumerate(FileConvertService._parse(text)):
+            if not line:
+                continue
+
+            if level:
+                if held_heading_piece is not None:
+                    units.append([held_heading_piece])
+                # A heading closes every section at its own level or deeper.
+                headings = [(heading_level, title) for heading_level, title in headings if heading_level < level]
+                held_heading_piece = self._piece(
+                    f"{'#' * level} {line}", line_index, [title for _, title in headings], token_counts_by_text
+                )
+                headings.append((level, line))
+                continue
+
+            heading_path = [title for _, title in headings]
+            for word in line.split():
+                word_piece = self._piece(word, line_index, heading_path, token_counts_by_text)
+                if held_heading_piece is None:
+                    units.append([word_piece])
+                else:
+                    units.append([held_heading_piece, word_piece])
+                    held_heading_piece = None
+
+        if held_heading_piece is not None:
+            units.append([held_heading_piece])
+        return units
+
+    def _piece(self, piece_text, line_index, heading_path, token_counts_by_text):
+        if piece_text not in token_counts_by_text:
+            token_counts_by_text[piece_text] = self.token_counter.count(piece_text)
+        return {
+            "text": piece_text,
+            "line_index": line_index,
+            "heading_path": heading_path,
+            "token_count": token_counts_by_text[piece_text],
+        }
+
+    def _header(self, document_id, heading_path):
+        """The path, then the headings a chunk starts under as `A > B > C`.
+
+        Held to half the window, so a deep outline cannot leave a chunk no room
+        for text. The outermost headings go first - the innermost says the most
+        about the passage, and the outermost is usually the file's own title,
+        which the path already has - and the path stays whatever it costs.
+        """
+        max_header_token_count = (FileConvertService.MAX_TOKENS - FileConvertService.SPECIAL_TOKEN_COUNT) // 2
+        for start_index in range(len(heading_path)):
+            header = f"{document_id}\n{FileConvertService.HEADING_PATH_SEPARATOR.join(heading_path[start_index:])}"
+            if self.token_counter.count(header) <= max_header_token_count:
+                return header
+        return document_id
+
+    @staticmethod
+    def _join(header, pieces):
+        """One chunk: its header, a blank line, then its pieces back in their lines."""
         lines = []
-        for level, line in FileConvertService._parse(text):
-            if not level and line:
-                lines.append(line)
-        return lines
+        last_line_index = None
+        for piece in pieces:
+            if piece["line_index"] == last_line_index:
+                lines[-1] += f" {piece['text']}"
+            else:
+                lines.append(piece["text"])
+                last_line_index = piece["line_index"]
+
+        if not lines:
+            return f"{header}\n"
+        return header + FileConvertService.HEADER_SEPARATOR + "\n".join(lines) + "\n"
+
+    @staticmethod
+    def remove_header(document_id, chunk_text):
+        """A chunk's text without the path and headings `split` put in front of it.
+
+        Left whole when it does not open with its path - a file the converter
+        could not rewrite was embedded as it came, with no header to take off,
+        and cutting at its first blank line would lose its opening paragraph.
+        """
+        if not chunk_text.startswith(document_id):
+            return chunk_text
+        return chunk_text.partition(FileConvertService.HEADER_SEPARATOR)[2]
 
     @staticmethod
     def _parse(text):
@@ -224,6 +327,10 @@ class FileConvertService:
         Headings follow Markdown's rules: 1-6 `#` then a space (or nothing), at
         most three spaces of indent - so `#include` and `#hashtag` are body
         text, and a `# comment` in a ``` block is dropped with the block.
+
+        Not kept: code blocks, images, link targets, table borders, rules, or
+        reference definitions - the last is where a Google Docs export keeps
+        its base64 images.
         """
         parsed_lines = []
         is_in_fence = False
@@ -261,7 +368,11 @@ class FileConvertService:
 
     @staticmethod
     def _clean(text):
-        """Markdown taken out of one line, leaving the words."""
+        """Markdown taken out of one line, leaving the words.
+
+        Every HTML tag goes too, which is what makes
+        `FileEmbedderService.CHUNK_SEPARATOR` - a comment - safe to split on.
+        """
         text = IMAGE_PATTERN.sub(" ", text)
         text = LINK_PATTERN.sub(r"\1", text)
         text = HTML_TAG_PATTERN.sub(" ", text)

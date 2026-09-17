@@ -2,8 +2,9 @@
 
 Deliberately not a BaseModel: this is not a row in the SQLite database, so it
 has no `id`, `created_date`, `updated_date` or `is_active`. Its identity is the
-Chroma document id, which `FileEmbedderService` sets to the file's path under
-the converted folder - extension and all.
+file's path under the converted folder - extension and all - which every chunk
+`FileEmbedderService` writes for the file carries as its `documentId`. One
+Document stands for all of a file's chunks, not for a Chroma row.
 """
 
 from datetime import datetime
@@ -31,14 +32,17 @@ class Document:
         self.modified_time = modified_time
 
     @staticmethod
-    def from_chroma(document_id, metadata):
-        """Build one from a row of `collection.get()`.
+    def from_chroma(chunk_id, metadata):
+        """Build one from a row of `collection.get()` - any chunk of the file.
 
-        `label` falls back to the id: a document embedded by an older run may
-        not carry the metadata, and a listing that hides it would be worse
+        The document id comes from the chunk's `documentId`, and falls back to
+        the row's own id: a document embedded before files were split is one
+        row keyed by its path. `label` falls back the same way - an older run
+        may not carry the metadata, and a listing that hides it would be worse
         than one that shows the raw path.
         """
         metadata = metadata or {}
+        document_id = metadata.get("documentId") or chunk_id
         return Document(
             document_id=document_id,
             label=metadata.get("label") or document_id,
