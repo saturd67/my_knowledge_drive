@@ -200,7 +200,7 @@ class FileConvertService:
         for unit in self._units(text):
             unit_token_count = sum(piece["token_count"] for piece in unit)
             if chunk_pieces and used_token_count + unit_token_count > budget_count:
-                chunks.append(FileConvertService._join(chunk_header, chunk_pieces))
+                chunks.append(self._join(chunk_header, chunk_pieces))
                 chunk_pieces = []
 
             if not chunk_pieces:
@@ -211,7 +211,7 @@ class FileConvertService:
             chunk_pieces += unit
             used_token_count += unit_token_count
 
-        chunks.append(FileConvertService._join(chunk_header, chunk_pieces))
+        chunks.append(self._join(chunk_header, chunk_pieces))
         return chunks
 
     def _units(self, text):
@@ -239,7 +239,7 @@ class FileConvertService:
         headings = []
         held_heading_piece = None
 
-        for line_index, (level, line) in enumerate(FileConvertService._parse(text)):
+        for line_index, (level, line) in enumerate(self._parse(text)):
             if not line:
                 continue
 
@@ -292,8 +292,7 @@ class FileConvertService:
                 return header
         return document_id
 
-    @staticmethod
-    def _join(header, pieces):
+    def _join(self, header, pieces):
         """One chunk: its header, a blank line, then its pieces back in their lines."""
         lines = []
         last_line_index = None
@@ -320,8 +319,7 @@ class FileConvertService:
             return chunk_text
         return chunk_text.partition(FileConvertService.HEADER_SEPARATOR)[2]
 
-    @staticmethod
-    def _parse(text):
+    def _parse(self, text):
         """(heading level, cleaned text) per line outside code blocks; level 0 for body.
 
         Headings follow Markdown's rules: 1-6 `#` then a space (or nothing), at
@@ -338,36 +336,35 @@ class FileConvertService:
         # and cut line by line it would leak into the text as long "words".
         text = FileConvertService.INLINE_IMAGE.sub(" ", text)
         for line in text.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith(("```", "~~~")):
+            stripped_line = line.lstrip()
+            if stripped_line.startswith(("```", "~~~")):
                 is_in_fence = not is_in_fence
                 continue
             if is_in_fence:
                 continue
 
-            level = len(stripped) - len(stripped.lstrip("#"))
+            level = len(stripped_line) - len(stripped_line.lstrip("#"))
             is_heading = (
-                len(line) - len(stripped) <= 3
+                len(line) - len(stripped_line) <= 3
                 and level in FileConvertService.HEADING_LEVELS
-                and stripped[level:level + 1] in ("", " ", "\t")
+                and stripped_line[level:level + 1] in ("", " ", "\t")
             )
             if is_heading:
-                title = FileConvertService._clean(FileConvertService._heading_title(stripped[level:]))
+                title = self._strip_markdown(self._heading_title(stripped_line))
                 if title:
                     parsed_lines.append((level, title))
                 continue
 
             if (
-                RULE_PATTERN.match(stripped)
-                or TABLE_DIVIDER_PATTERN.match(stripped)
-                or REFERENCE_DEFINITION_PATTERN.match(stripped)
+                RULE_PATTERN.match(stripped_line)
+                or TABLE_DIVIDER_PATTERN.match(stripped_line)
+                or REFERENCE_DEFINITION_PATTERN.match(stripped_line)
             ):
                 continue
-            parsed_lines.append((0, FileConvertService._clean(LIST_MARKER_PATTERN.sub("", stripped))))
+            parsed_lines.append((0, self._strip_markdown(LIST_MARKER_PATTERN.sub("", stripped_line))))
         return parsed_lines
 
-    @staticmethod
-    def _clean(text):
+    def _strip_markdown(self, text):
         """Markdown taken out of one line, leaving the words.
 
         Every HTML tag goes too, which is what makes
@@ -385,14 +382,11 @@ class FileConvertService:
         ]
         return " ".join(words)
 
-    @staticmethod
-    def _heading_title(after_markers):
-        """The words of a heading, from whatever follows its opening `#`s.
-
-        A closing run of `#` is only markup when a space precedes it, so
-        `## C#` keeps its `#` while `## Setup ##` drops the trailing pair.
+    def _heading_title(self, heading_line):
         """
-        title = after_markers.strip()
+        Strip and remove the leading and trailing '#' characters from a heading line.
+        """
+        title = heading_line.strip().lstrip("#").strip()
         without_closing = title.rstrip("#")
         if without_closing != title and (not without_closing or without_closing[-1] in " \t"):
             title = without_closing.rstrip()
